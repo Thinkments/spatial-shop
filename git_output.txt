@@ -1,0 +1,5 @@
+commit 1a43822b555a6bb4af6ed6ebca414ace999d813c
+Author: Corey Spicer <Spicer@thinkments.com>
+Date:   Tue Mar 17 16:59:49 2026 -0500
+
+    feat: Add 3D Panorama Editor with hotspot management, export functionality, and glassmorphism UI.
