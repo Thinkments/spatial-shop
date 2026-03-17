@@ -1,0 +1,492 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>10x 3D Panorama Editor</title>
+    <!-- We link to the main internal xrblocks style if needed -->
+    <link rel="stylesheet" href="../../samples/main.css">
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            font-family: 'Inter', 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            background-color: #000;
+            color: #fff;
+        }
+
+        #ui-layer {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none; /* Let clicks pass through to 3D canvas */
+        }
+
+        /* Glassmorphism Product Card UI */
+        .glass-card {
+            pointer-events: auto; /* Catch clicks on the cards themselves */
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 16px;
+            padding: 20px;
+            width: 260px;
+            box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.3);
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            transition: transform 0.2s ease, opacity 0.2s ease;
+            transform-origin: bottom center;
+        }
+
+        /* Subtle glowing edge */
+        .glass-card::before {
+            content: '';
+            position: absolute;
+            top: 0; left: 0; right: 0; bottom: 0;
+            border-radius: 16px;
+            box-shadow: inset 0 0 20px rgba(255,255,255,0.05);
+            pointer-events: none;
+        }
+
+        .card-header {
+            font-size: 1.1rem;
+            font-weight: 600;
+            margin: 0;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .card-close {
+            cursor: pointer;
+            width: 24px;
+            height: 24px;
+            border-radius: 50%;
+            background: rgba(255,255,255,0.1);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 14px;
+            line-height: 1;
+        }
+        .card-close:hover {
+            background: rgba(255,100,100,0.5);
+        }
+
+        /* Minimal Inputs */
+        .glass-input {
+            width: 100%;
+            box-sizing: border-box;
+            background: rgba(0,0,0,0.2);
+            border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 8px;
+            color: white;
+            padding: 10px;
+            font-family: inherit;
+            font-size: 0.9rem;
+            outline: none;
+            transition: border-color 0.2s;
+        }
+        .glass-input:focus {
+            border-color: rgba(255,255,255,0.5);
+        }
+
+        .glass-btn {
+            background: linear-gradient(135deg, rgba(255,255,255,0.9), rgba(255,255,255,0.7));
+            color: #000;
+            border: none;
+            border-radius: 8px;
+            padding: 10px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: transform 0.1s, box-shadow 0.2s;
+            margin-top: 8px;
+        }
+        .glass-btn:hover {
+            transform: scale(1.02);
+            box-shadow: 0 4px 12px rgba(255,255,255,0.2);
+        }
+
+        /* Bottom Toolbar */
+        #toolbar {
+            position: absolute;
+            bottom: 30px;
+            left: 50%;
+            transform: translateX(-50%);
+            display: flex;
+            gap: 16px;
+            background: rgba(0,0,0,0.5);
+            backdrop-filter: blur(10px);
+            padding: 16px 24px;
+            border-radius: 30px;
+            border: 1px solid rgba(255,255,255,0.1);
+            pointer-events: auto;
+        }
+        
+        #toolbar .glass-btn {
+            margin: 0;
+            background: rgba(255,255,255,0.1);
+            color: white;
+            border: 1px solid rgba(255,255,255,0.2);
+        }
+        #toolbar .glass-btn:hover {
+            background: rgba(255,255,255,0.2);
+        }
+
+        /* Dot Marker */
+        .hotspot-marker {
+            width: 24px;
+            height: 24px;
+            background: rgba(255, 255, 255, 0.8);
+            border-radius: 50%;
+            box-shadow: 0 0 15px rgba(255, 255, 255, 0.5);
+            cursor: pointer;
+            pointer-events: auto;
+            transform: translate(-50%, -50%);
+            transition: transform 0.2s, background 0.2s;
+        }
+        .hotspot-marker:hover {
+            transform: translate(-50%, -50%) scale(1.2);
+            background: #fff;
+        }
+
+        /* Hide elements dynamically */
+        .hidden {
+            display: none !important;
+            opacity: 0;
+            pointer-events: none;
+        }
+
+        /* Overlay for Export Output */
+        #export-overlay {
+            position: absolute;
+            top: 50%; left: 50%;
+            transform: translate(-50%, -50%);
+            width: 80%; max-width: 600px;
+            background: rgba(10,10,10,0.9);
+            border: 1px solid rgba(255,255,255,0.2);
+            border-radius: 16px;
+            padding: 24px;
+            z-index: 1000;
+            pointer-events: auto;
+        }
+        #export-text {
+            width: 100%;
+            height: 200px;
+            background: #000;
+            color: #0f0;
+            font-family: monospace;
+            padding: 12px;
+            box-sizing: border-box;
+            border: 1px solid #333;
+            border-radius: 8px;
+            margin-bottom: 16px;
+            resize: vertical;
+        }
+    </style>
+    
+    <!-- Import map based on xrblocks README -->
+    <script type="importmap">
+        {
+          "imports": {
+            "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
+            "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/",
+            "xrblocks": "../../build/xrblocks.js",
+            "xrblocks/addons/": "../../build/addons/"
+          }
+        }
+    </script>
+</head>
+<body>
+
+    <!-- 3D Canvas will be auto-attached by three.js -->
+    
+    <!-- CSS2DRenderer container (attached logically by the script, but we prepare styling above) -->
+
+    <div id="ui-layer">
+        
+        <div id="toolbar">
+            <div style="color: rgba(255,255,255,0.7); font-size: 0.9rem; margin-right: 16px; display:flex; align-items:center;">
+                Double-click to add a 3D hotspot
+            </div>
+            <button id="btn-export" class="glass-btn">Export JSON</button>
+            <button id="btn-demo-mode" class="glass-btn">Toggle Preview</button>
+        </div>
+
+    </div>
+
+    <!-- Export Modal -->
+    <div id="export-overlay" class="hidden">
+        <h3 style="margin-top:0;">Store Configuration Output</h3>
+        <p style="font-size: 0.9rem; color: #aaa;">Copy this JSON to your thinkments.com backend.</p>
+        <textarea id="export-text" readonly></textarea>
+        <div style="display:flex; justify-content:flex-end; gap: 12px;">
+            <button id="btn-copy" class="glass-btn" style="background: rgba(255,255,255,0.2); color:white; border:1px solid #fff;">Copy to Clipboard</button>
+            <button id="btn-close-export" class="glass-btn">Close</button>
+        </div>
+    </div>
+
+    <!-- Application Script -->
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+        import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
+
+        // Globals
+        let scene, camera, renderer, cssRenderer, controls;
+        let raycaster, mouse;
+        const sphereRadius = 500;
+        
+        // Application State
+        const hotspots = [];
+        let isPreviewMode = false;
+
+        init();
+        animate();
+
+        function init() {
+            // 1. Setup Data Structures
+            raycaster = new THREE.Raycaster();
+            mouse = new THREE.Vector2();
+
+            // 2. Setup Three.js Scene
+            scene = new THREE.Scene();
+            camera = new THREE.PerspectiveCamera( 75, window.innerWidth / window.innerHeight, 0.1, 1000 );
+            camera.position.set(0, 0, 0.1); // Inside the sphere
+
+            // WebGL Renderer
+            renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+            renderer.setSize( window.innerWidth, window.innerHeight );
+            renderer.setPixelRatio( window.devicePixelRatio );
+            document.body.appendChild( renderer.domElement );
+
+            // CSS2D Renderer for HTML Overlays
+            cssRenderer = new CSS2DRenderer();
+            cssRenderer.setSize( window.innerWidth, window.innerHeight );
+            cssRenderer.domElement.style.position = 'absolute';
+            cssRenderer.domElement.style.top = '0px';
+            cssRenderer.domElement.style.pointerEvents = 'none'; // Let WebGL catch clicks where no UI exists
+            document.body.appendChild( cssRenderer.domElement );
+
+            // Controls
+            controls = new OrbitControls( camera, renderer.domElement );
+            controls.enableZoom = true;
+            controls.enablePan = false;
+            // Limit zoom to stay inside
+            controls.minDistance = 0.1;
+            controls.maxDistance = 100;
+
+            // 3. Create the Equirectangular Sphere
+            const geometry = new THREE.SphereGeometry( sphereRadius, 60, 40 );
+            geometry.scale( -1, 1, 1 ); // Invert the sphere so texture maps on the inside
+
+            // Load a placeholder panorama (if available, else basic material for testing)
+            const mapUrl = 'https://cdn.jsdelivr.net/gh/mrdoob/three.js@master/examples/textures/2294472375_24a3b8ef46_o.jpg'; // Placeholder park scene
+            const texture = new THREE.TextureLoader().load( mapUrl );
+            texture.colorSpace = THREE.SRGBColorSpace;
+            
+            const material = new THREE.MeshBasicMaterial( { map: texture } );
+            const sphere = new THREE.Mesh( geometry, material );
+            sphere.name = "PanoramaSphere";
+            scene.add( sphere );
+
+            // 4. Event Listeners
+            window.addEventListener( 'resize', onWindowResize );
+            
+            // Allow double click on the WebGL canvas to spawn points
+            renderer.domElement.addEventListener( 'dblclick', onDoubleClick );
+
+            // UI Listeners
+            document.getElementById('btn-export').addEventListener('click', showExport);
+            document.getElementById('btn-close-export').addEventListener('click', hideExport);
+            document.getElementById('btn-copy').addEventListener('click', copyExport);
+            document.getElementById('btn-demo-mode').addEventListener('click', togglePreviewMode);
+        }
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize( window.innerWidth, window.innerHeight );
+            cssRenderer.setSize( window.innerWidth, window.innerHeight );
+        }
+
+        function createHotspot(intersectionPoint) {
+            // Generate a unique ID
+            const id = 'hotspot_' + Date.now();
+            
+            // 1. Create Data Model
+            const hpData = {
+                id: id,
+                position: { x: intersectionPoint.x, y: intersectionPoint.y, z: intersectionPoint.z },
+                name: "New Product",
+                price: "$0.00",
+                link: "https://thinkments.com/product",
+                isOpen: true 
+            };
+
+            // 2. Create the HTML Marker (the small dot)
+            const markerDiv = document.createElement('div');
+            markerDiv.className = 'hotspot-marker';
+            markerDiv.title = hpData.name;
+            
+            // 3. Create the Glassmorphic UI Card (initially open)
+            const cardDiv = document.createElement('div');
+            cardDiv.className = 'glass-card';
+            cardDiv.innerHTML = `
+                <div class="card-header">
+                    <span>Edit Product</span>
+                    <div class="card-close">&times;</div>
+                </div>
+                <input class="glass-input card-name" placeholder="Product Name" value="${hpData.name}" />
+                <input class="glass-input card-price" placeholder="Price (e.g. $99.99)" value="${hpData.price}" />
+                <input class="glass-input card-link" placeholder="Destination URL" value="${hpData.link}" />
+                <button class="glass-btn btn-save">Save & Close</button>
+            `;
+
+            // Position card slightly offset from marker
+            const uiWrapper = document.createElement('div');
+            uiWrapper.style.position = 'relative';
+            uiWrapper.appendChild(markerDiv);
+            
+            // Position card above marker
+            cardDiv.style.position = 'absolute';
+            cardDiv.style.bottom = '40px'; 
+            cardDiv.style.left = '-130px'; // center horizontally with 260px width
+            uiWrapper.appendChild(cardDiv);
+
+            // 4. Attach to CSS2DObject
+            const cssObject = new CSS2DObject(uiWrapper);
+            cssObject.position.copy(intersectionPoint);
+            scene.add(cssObject);
+
+            // 5. Wire Events
+            const saveBtn = cardDiv.querySelector('.btn-save');
+            const closeBtn = cardDiv.querySelector('.card-close');
+            const nameIn = cardDiv.querySelector('.card-name');
+            const priceIn = cardDiv.querySelector('.card-price');
+            const linkIn = cardDiv.querySelector('.card-link');
+
+            const collapseCard = () => {
+                hpData.name = nameIn.value;
+                hpData.price = priceIn.value;
+                hpData.link = linkIn.value;
+                hpData.isOpen = false;
+                cardDiv.classList.add('hidden');
+            };
+
+            const toggleCard = () => {
+                if(isPreviewMode) return; // In preview, clicking might just navigate, or show a read-only cart view
+                
+                hpData.isOpen = !hpData.isOpen;
+                if(hpData.isOpen) {
+                    cardDiv.classList.remove('hidden');
+                } else {
+                    cardDiv.classList.add('hidden');
+                }
+            };
+
+            saveBtn.addEventListener('click', collapseCard);
+            closeBtn.addEventListener('click', collapseCard);
+            
+            // Prevent pointer events on card from rotating the camera
+            uiWrapper.addEventListener('pointerdown', (e) => e.stopPropagation());
+            // Double click on marker or card shouldn't spawn another marker
+            uiWrapper.addEventListener('dblclick', (e) => e.stopPropagation());
+            
+            // Click marker to toggle edit
+            markerDiv.addEventListener('click', toggleCard);
+
+            // Save to state
+            hotspots.push({
+                data: hpData,
+                cssObject: cssObject,
+                ui: uiWrapper
+            });
+        }
+
+        function onDoubleClick( event ) {
+            if(isPreviewMode) return;
+            
+            // Calculate mouse position in normalized device coordinates (-1 to +1)
+            mouse.x = ( event.clientX / window.innerWidth ) * 2 - 1;
+            mouse.y = - ( event.clientY / window.innerHeight ) * 2 + 1;
+
+            raycaster.setFromCamera( mouse, camera );
+
+            // Calculate objects intersecting the picking ray
+            const intersects = raycaster.intersectObjects( scene.children );
+
+            for ( let i = 0; i < intersects.length; i ++ ) {
+                if(intersects[i].object.name === "PanoramaSphere") {
+                    createHotspot(intersects[i].point);
+                    break;
+                }
+            }
+        }
+
+        // --- Export & UI Logic --- 
+        function generateJSON() {
+            // Clean up the data for export
+            const exportData = hotspots.map(h => ({
+                id: h.data.id,
+                position: h.data.position, // {x, y, z}
+                productDetails: {
+                    name: h.data.name,
+                    price: h.data.price,
+                    url: h.data.link
+                }
+            }));
+            return JSON.stringify({ version: "1.0", sceneID: "pano-1", hotspots: exportData }, null, 2);
+        }
+
+        function showExport() {
+            document.getElementById('export-text').value = generateJSON();
+            document.getElementById('export-overlay').classList.remove('hidden');
+        }
+
+        function hideExport() {
+            document.getElementById('export-overlay').classList.add('hidden');
+        }
+
+        function copyExport() {
+            const text = document.getElementById('export-text');
+            text.select();
+            document.execCommand('copy');
+            const btn = document.getElementById('btn-copy');
+            btn.textContent = "Copied!";
+            setTimeout(() => btn.textContent = "Copy to Clipboard", 2000);
+        }
+
+        function togglePreviewMode() {
+            isPreviewMode = !isPreviewMode;
+            const btn = document.getElementById('btn-demo-mode');
+            
+            if(isPreviewMode) {
+                btn.textContent = "Edit Mode";
+                document.body.style.boxShadow = "inset 0 0 0 4px #0f0"; // Green border to indicate preview
+                
+                // Hide all open editor cards
+                hotspots.forEach(h => {
+                    const card = h.ui.querySelector('.glass-card');
+                    card.classList.add('hidden');
+                    // In a real app, clicking the marker in Preview Mode would route to the URL or add to cart.
+                });
+            } else {
+                btn.textContent = "Toggle Preview";
+                document.body.style.boxShadow = "none";
+            }
+        }
+
+        function animate() {
+            requestAnimationFrame( animate );
+            controls.update(); // required if controls.enableDamping or controls.autoRotate are set
+            renderer.render( scene, camera );
+            cssRenderer.render( scene, camera );
+        }
+    </script>
+</body>
+</html>
